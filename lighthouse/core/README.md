@@ -16,7 +16,7 @@ Decouples all agent logic from the specifics of the target system:
 - `LangGraphAdapter` — hooks into LangGraph execution traces
 
 ### `meta_agent.py`
-The central orchestrator. Loads an `AuditConfig`, picks the right adapter, calls all specialist agents in sequence, enforces budget gates, and produces the final `AuditReport`.
+The central orchestrator. Loads an `AuditConfig`, picks the right adapter, calls all specialist agents in sequence, and produces the final `AuditReport`.
 
 ## Data Flow
 

@@ -5,7 +5,39 @@
 
 ---
 
-## Step 1 — Read in This Order
+## Step 0 — Environment Setup (Poetry)
+
+This project uses **Poetry** for dependency management. Do this before anything else.
+
+```bash
+# 1. Install Poetry (if not already installed)
+curl -sSL https://install.python-poetry.org | python3 -
+
+# 2. Install all dependencies (creates a .venv in the project root)
+poetry install
+
+# 3. Activate the environment
+poetry shell
+
+# 4. Verify
+python -c "import anthropic, pydantic, jinja2; print('OK')"
+```
+
+> **Never use `pip install` directly.** All dependency changes must go through `pyproject.toml` via `poetry add <package>`.
+
+Key Poetry commands for day-to-day use:
+
+| Command | Purpose |
+|---------|---------|
+| `poetry install` | Install all deps from `poetry.lock` |
+| `poetry add <pkg>` | Add a runtime dependency |
+| `poetry add --group dev <pkg>` | Add a dev-only dependency |
+| `poetry run pytest` | Run tests inside the venv without activating |
+| `poetry run lighthouse audit ./target` | Run the CLI without activating |
+
+---
+
+
 
 Work through these files sequentially. Each one builds on the last.
 
@@ -30,9 +62,8 @@ After reading the folder READMEs, open the **module docstring** of any file you 
 | Rule | Why |
 |------|-----|
 | **Never pass raw dicts between agents** | All inter-agent data must be a validated Pydantic model instance |
-| **Call `gate_check()` before every LLM call** | Hard $50 budget cap per audit run — never overspend silently |
 | **Append to JSONL immediately on every event** | Never batch trace writes; crash safety requires immediate persistence |
-| **Sonnet 4 for bulk tasks, Opus 4 only for complex reasoning** | Cost discipline — see `utils/budget.py` for model pricing |
+| **Sonnet 4 for bulk tasks, Opus 4 only for complex reasoning** | Model discipline — choose the right model for the task |
 | **All target interactions go through a `TargetAdapter`** | Framework agnosticism — agents must never call the target directly |
 
 ---
@@ -47,7 +78,6 @@ schemas.py              ← ALL data contracts. Define and stabilize this first.
     ├── adapters.py         ← Depends on schemas (TopologyMap, etc.)
     │
     ├── tracing.py          ← No dependencies. Build early.
-    ├── budget.py           ← No dependencies. Build early.
     ├── validators.py       ← Depends on schemas.
     │
     ├── reconnaissance.py  ─┐

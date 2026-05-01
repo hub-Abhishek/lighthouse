@@ -24,5 +24,4 @@ Three sample AI agents are provided to validate end-to-end behavior:
 
 - Lighthouse detects ≥ 8 of 11 standard test categories
 - Audit completes in < 30 minutes
-- Budget stays under $50 per run
 - JSONL trace allows full audit reconstruction

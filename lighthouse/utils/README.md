@@ -11,10 +11,6 @@ Logged events include:
 - Agent start / completion
 - Every LLM API call (prompt + response)
 - Each `Finding` as it is discovered
-- Budget checkpoints
-
-### `budget.py`
-**Real-time cost tracker.** Maintains a running tally of API spend across all agents. Exposes a `gate_check()` method that the meta-agent calls before each expensive operation to enforce the `$50` hard limit.
 
 ### `validators.py`
 **Quality gates.** Validates agent outputs against expected schemas and business rules before they are passed to the next stage. Prevents malformed or empty results from propagating silently through the pipeline.
@@ -23,6 +19,5 @@ Logged events include:
 
 ```python
 from lighthouse.utils.tracing import log_event
-from lighthouse.utils.budget import BudgetTracker
 from lighthouse.utils.validators import validate_findings
 ```

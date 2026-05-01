@@ -6,16 +6,14 @@
 
 Lighthouse audits opaque AI systems across 6 dimensions:
 
-| Dimension | Agent | Cost Target |
-|-----------|-------|-------------|
-| Reconnaissance | `agents/reconnaissance.py` | $2–5 |
-| Test Design | `agents/test_designer.py` | $1–3 |
-| Red-Teaming | `agents/red_team.py` | $15–20 |
-| Operational | `agents/operational.py` | $0 |
-| Compliance | `agents/compliance.py` | $3–5 |
-| Reporting | `agents/synthesizer.py` | $5–8 |
-
-**Hard budget limit: $50 per audit run.**
+| Dimension | Agent |
+|-----------|-------|
+| Reconnaissance | `agents/reconnaissance.py` |
+| Test Design | `agents/test_designer.py` |
+| Red-Teaming | `agents/red_team.py` |
+| Operational | `agents/operational.py` |
+| Compliance | `agents/compliance.py` |
+| Reporting | `agents/synthesizer.py` |
 
 ## Project Layout
 
@@ -23,7 +21,7 @@ Lighthouse audits opaque AI systems across 6 dimensions:
 lighthouse/
 ├── README.md               ← You are here
 ├── claude.md               ← Project specification and instructions
-├── pyproject.toml          ← Dependencies (Poetry / uv)
+├── pyproject.toml          ← Poetry project definition & dependencies
 ├── lighthouse/             ← Main Python package
 │   ├── core/               ← Orchestrator, schemas, adapters
 │   ├── agents/             ← Specialist audit agents
@@ -38,8 +36,14 @@ lighthouse/
 ## Quick Start
 
 ```bash
-# Install dependencies
-uv install   # or: poetry install
+# Install Poetry (if you don't have it)
+curl -sSL https://install.python-poetry.org | python3 -
+
+# Install dependencies and create virtualenv
+poetry install
+
+# Activate the shell
+poetry shell
 
 # Run an audit against a local agent repo
 lighthouse audit ./my-agent --budget 50

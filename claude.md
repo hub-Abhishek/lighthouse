@@ -28,18 +28,13 @@ Lighthouse is a meta-agentic system that audits and red-teams AI agents to provi
   - **Mode B:** API endpoint probing (REST/GraphQL agents)
   - **Mode C:** Live system observation (via logging hooks)
 
-### 3. Budget-Conscious
-- Hard limit: $50 per audit run
-- Track API costs in real-time
-- Use Sonnet 4 for bulk operations, Opus 4 only for complex reasoning
-
 ## Project Structure
 
 ```
 lighthouse/
 ├── claude.md                 # This file - project instructions
 ├── README.md                 # User-facing documentation
-├── pyproject.toml            # Poetry/uv dependencies
+├── pyproject.toml            # Poetry project definition & dependencies
 ├── lighthouse/
 │   ├── __init__.py
 │   ├── core/
@@ -132,7 +127,6 @@ The central brain that:
 ```python
 async def plan_audit(config: AuditConfig) -> TestPlan
 async def execute_audit(plan: TestPlan) -> AuditReport
-async def gate_check(current_cost: float, budget: float) -> bool
 ```
 
 ### 4. Specialist Agents
@@ -143,13 +137,11 @@ Each agent is a focused module with a single responsibility:
 - **Input:** Target adapter
 - **Output:** `TopologyMap` (list of agents, tools, prompts discovered)
 - **Method:** Use Claude Opus to analyze READMEs, code, or API schemas
-- **Cost Target:** ~$2-5
 
 #### B. Test Designer (`test_designer.py`)
 - **Input:** `TopologyMap`
 - **Output:** `TestPlan` (specific probes to run)
 - **Method:** LLM generates 11-check test suite based on target's attack surface
-- **Cost Target:** ~$1-3
 
 #### C. Red-Team Executor (`red_team.py`)
 - **Input:** `TestPlan`
@@ -158,13 +150,11 @@ Each agent is a focused module with a single responsibility:
   - LLM generates adversarial payloads (prompt injection, jailbreaks)
   - Deterministic code executes them via adapter
   - LLM analyzes responses for failures
-- **Cost Target:** ~$15-20
 
 #### D. Operational Probe (`operational.py`)
 - **Input:** Target adapter
 - **Output:** `PerformanceMetrics` (latency, cost per call, token usage)
 - **Method:** Pure Python - no LLM needed
-- **Cost Target:** $0
 
 #### E. Compliance Mapper (`compliance.py`)
 - **Input:** `list[Finding]`
@@ -173,13 +163,11 @@ Each agent is a focused module with a single responsibility:
   - Deterministic lookup table for known patterns
   - LLM fallback for novel violations
 - **Regulations:** EU AI Act, NIST AI RMF, OWASP Top 10 for LLMs
-- **Cost Target:** ~$3-5
 
 #### F. Report Synthesizer (`synthesizer.py`)
 - **Input:** `AuditReport` (all findings)
 - **Output:** `report.json` + `dashboard.html`
 - **Method:** LLM generates executive summary, renders HTML via Jinja2
-- **Cost Target:** ~$5-8
 
 ### 5. Stateful Event Logging (`tracing.py`)
 
@@ -206,10 +194,10 @@ Log every:
 ## Implementation Workflow
 
 ### Phase 1: Foundation (Days 1-2)
-1. Set up project structure with `uv` or Poetry
+1. Set up project structure with Poetry (`poetry install`)
 2. Define all Pydantic schemas in `schemas.py`
 3. Build `LocalRepoAdapter` for testing
-4. Implement `tracing.py` and `budget.py` utilities
+4. Implement `tracing.py` and `validators.py` utilities
 
 ### Phase 2: Specialist Agents (Days 3-5)
 Build agents in this order:
@@ -291,12 +279,11 @@ Run Lighthouse against each and validate:
 
 A successful MVP delivers:
 
-✅ **Functional:** Can audit a LangGraph agent and produce an HTML report  
-✅ **Accurate:** Detects at least 8/11 of the standard test categories  
-✅ **Budget-Conscious:** Stays under $50 per audit  
-✅ **Transparent:** JSONL trace allows full reconstruction of audit logic  
-✅ **Compliant:** Maps findings to EU AI Act + NIST frameworks  
-✅ **Fast:** Completes typical audit in 15-20 minutes  
+✅ **Functional:** Can audit a LangGraph agent and produce an HTML report
+✅ **Accurate:** Detects at least 8/11 of the standard test categories
+✅ **Transparent:** JSONL trace allows full reconstruction of audit logic
+✅ **Compliant:** Maps findings to EU AI Act + NIST frameworks
+✅ **Fast:** Completes typical audit in 15-20 minutes
 
 ## Antigravity Integration
 

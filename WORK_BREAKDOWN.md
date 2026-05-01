@@ -1,350 +1,231 @@
-# Lighthouse: Two-Person Work Breakdown
+# Lighthouse: Phased Build Plan
 
-## Overview
+## Philosophy
 
-This document splits the Lighthouse project into two parallel development tracks that can be worked on simultaneously with minimal merge conflicts.
-
-## The Split Strategy
-
-**Track A (Foundation & Adapters)** - Focus on infrastructure and target integration  
-**Track B (Agents & Intelligence)** - Focus on LLM-powered analysis and reporting
-
-The split is designed so that:
-- Each track owns distinct files/modules
-- Integration points are clearly defined with contracts (Pydantic schemas)
-- Both tracks can test independently before integration
-- Merge conflicts are minimized (different directories)
+Build sequentially in dependency order. Each phase produces a testable artifact before the next begins. The Reconnaissance Agent is the hardest and most important piece — it validates the core architecture (adapter pattern + LLM structured output) and everything else is downstream of it.
 
 ---
 
-## Track A: Foundation & Adapters
-**Developer Role:** Infrastructure Engineer  
-**Duration:** ~7-9 days  
-**Primary Focus:** Build the "plumbing" that connects to target agents
+## Phase 0 — Project Foundation
+**Goal:** Everything compiles, nothing runs yet.  
+**Unblock:** All subsequent phases depend on schemas being frozen.
 
-### Responsibilities
+### Tasks
 
-#### Phase 1: Core Infrastructure (Days 1-3)
-1. **Project Setup**
-   - Initialize repo structure
-   - Set up `pyproject.toml` with dependencies
-   - Configure linting (ruff) and type checking (mypy)
-   - Create `.env.example` for API keys
+1. **Environment**
+   - `poetry install` — install all dependencies
+   - Create `.env.example` with `ANTHROPIC_API_KEY=`
+   - Configure `ruff` and `mypy` in `pyproject.toml` (already done)
 
-2. **Pydantic Schemas** (`lighthouse/core/schemas.py`)
-   - Define ALL data contracts:
-     - `AuditConfig`
-     - `Finding`
-     - `AuditReport`
-     - `TopologyMap`
-     - `TestPlan`
-     - `PerformanceMetrics`
-   - This is the CONTRACT between both tracks
-   - **Blocker for Track B:** Must be done by end of Day 2
+2. **Pydantic Schemas** (`lighthouse/core/schemas.py`)  
+   Define and **freeze** all data contracts before writing any agent:
+   ```python
+   AuditConfig       # Input: target path/API, test categories
+   TopologyMap       # Output of Recon
+   TestPlan          # Output of Test Designer
+   Finding           # Output of Red-Team / Compliance
+   AuditReport       # Final aggregated output
+   PerformanceMetrics  # Output of Operational probe
+   ```
+   > **Rule:** No other module is written until schemas are stable. Schema changes require updating all downstream modules.
 
 3. **Utilities** (`lighthouse/utils/`)
-   - `tracing.py` - JSONL event logging
-   - `budget.py` - API cost tracking
-   - `validators.py` - Quality gates and schema validation
+   - `tracing.py` — append-only JSONL event logger (no dependencies)
+   - `validators.py` — validate agent outputs before passing downstream
 
-#### Phase 2: Adapter System (Days 3-5)
-4. **Target Adapter Protocol** (`lighthouse/core/adapters.py`)
-   - Define the `TargetAdapter` Protocol
-   - Implement `LocalRepoAdapter`:
-     - `list_agents()` - Scan Python files for agent definitions
-     - `invoke()` - Call agent functions directly
-     - `trace()` - Capture stdout/logs
-   - Write unit tests for the adapter
+4. **Test Fixtures** (`tests/fixtures/`)  
+   Create minimal stubs now so Phase 1 has something to run against:
+   - `benign_agent/` — simple RAG chatbot (should produce clean topology)
+   - `vulnerable_agent/` — has prompt injection strings in its system prompt
 
-5. **Operational Probe Agent** (`lighthouse/agents/operational.py`)
-   - Pure Python - no LLM needed
-   - Measures: latency, token usage, cost per call
-   - Returns `PerformanceMetrics`
-   - **Why Track A?** It's deterministic and tests the adapter
-
-#### Phase 3: Integration & CLI (Days 6-9)
-6. **Meta-Agent Orchestrator** (`lighthouse/core/meta_agent.py`)
-   - Build the sequential pipeline:
-     ```
-     Recon → Test Design → [Red-Team + Operational] → Compliance → Synthesis
-     ```
-   - Implement budget gating
-   - Wire up all 6 agents (Track B builds 5 of them)
-   - Add `asyncio.gather()` for parallel execution
-
-7. **CLI Interface** (`lighthouse/cli.py`)
-   - Argument parsing: `lighthouse audit ./target --budget 50`
-   - Progress bars (use `rich` library)
-   - Error handling and user feedback
-
-8. **Sample Target Agents** (`tests/fixtures/`)
-   - Create 3 test agents:
-     - `benign_agent/` - Simple RAG chatbot
-     - `vulnerable_agent/` - Has prompt injection weaknesses
-     - `complex_agent/` - Multi-agent system
-   - These let Track B test their agents independently
-
-### Deliverables for Track A
-- ✅ Complete adapter system with tests
-- ✅ Working operational probe
-- ✅ Meta-agent orchestrator (may have placeholder calls to Track B agents initially)
-- ✅ CLI that can run end-to-end (even if some agents are stubs)
-- ✅ Sample target agents for testing
-
-### Integration Points
-**What Track A needs from Track B:**
-- Pydantic schemas for agent outputs (defined in shared `schemas.py`)
-- Agent function signatures:
-  ```python
-  async def run_reconnaissance(adapter: TargetAdapter) -> TopologyMap
-  async def design_tests(topology: TopologyMap) -> TestPlan
-  async def execute_red_team(plan: TestPlan, adapter: TargetAdapter) -> list[Finding]
-  async def map_compliance(findings: list[Finding]) -> list[Finding]
-  async def synthesize_report(report: AuditReport) -> tuple[str, str]
-  ```
+### Exit Criteria
+- [ ] `poetry run mypy lighthouse/` passes
+- [ ] `poetry run pytest tests/` passes (even with zero tests)
+- [ ] `AuditConfig` can be instantiated and serialized
 
 ---
 
-## Track B: Agents & Intelligence
-**Developer Role:** AI/LLM Engineer  
-**Duration:** ~7-9 days  
-**Primary Focus:** Build the LLM-powered analysis and reporting
+## Phase 1 — Reconnaissance Agent ⚠️ Hardest Phase
+**Goal:** Given a local Python codebase, produce a structured `TopologyMap`.  
+**Why first:** Validates the two hardest problems simultaneously — the adapter pattern and LLM structured output extraction.
 
-### Responsibilities
+### Why This Is Hard
+- LLM must read arbitrary Python code and extract meaningful structure
+- Output must conform to a strict Pydantic schema (`TopologyMap`)
+- The `LocalRepoAdapter` must reliably surface the right content to the LLM
+- Prompt engineering here sets the quality bar for the entire system
 
-#### Phase 1: Foundation (Days 1-2)
-1. **Anthropic SDK Setup**
-   - Create `lighthouse/core/llm_client.py`
-   - Wrapper functions for Claude API calls
-   - Token counting and cost calculation
-   - Model selection logic (Opus vs Sonnet)
+### Tasks
 
-2. **System Prompts Library** (`lighthouse/prompts/`)
-   - Create reusable prompt templates
-   - Files: `recon.txt`, `test_design.txt`, `red_team.txt`, `compliance.txt`, `synthesis.txt`
-   - Use Jinja2 for variable substitution
+1. **`LocalRepoAdapter`** (`lighthouse/core/adapters.py`)
+   - Implement the `TargetAdapter` Protocol:
+     ```python
+     async def list_agents() -> list[str]   # find agent definitions in .py files
+     async def invoke(agent_id, payload)    # call agent functions directly
+     async def trace(execution_id)          # capture stdout/logs
+     ```
+   - `list_agents()` strategy: walk the repo, find files containing `class *Agent`, `@tool`, graph definitions
+   - Write unit tests against `tests/fixtures/benign_agent/`
 
-#### Phase 2: Specialist Agents (Days 3-7)
-Build these 5 agents (in order of dependency):
+2. **LLM Client Wrapper** (`lighthouse/core/llm_client.py`)
+   - Thin wrapper around the Anthropic SDK
+   - Handles model selection (Opus 4 vs Sonnet 4)
+   - Logs every call via `tracing.py` immediately
 
 3. **Reconnaissance Agent** (`lighthouse/agents/reconnaissance.py`)
-   - **Input:** `TargetAdapter`
-   - **Output:** `TopologyMap`
-   - **Method:** 
-     - Use adapter to read codebase/API docs
-     - Claude Opus analyzes structure
-     - Extracts: agents, tools, prompts, data sources
-   - **Cost Target:** $2-5
+   - Input: `LocalRepoAdapter`
+   - Output: `TopologyMap`
+   - Method:
+     - Use adapter to collect: READMEs, agent definitions, tool registrations, system prompts, graph edges
+     - Feed to Claude Opus 4 with a structured extraction prompt
+     - Parse response into `TopologyMap` using `instructor` / `.parse()`
+   - Prompt should extract:
+     - All agent nodes / endpoints discovered
+     - Tools each agent can call
+     - System prompt strings found in code
+     - External data sources (DBs, vector stores, APIs)
 
-4. **Test Designer** (`lighthouse/agents/test_designer.py`)
-   - **Input:** `TopologyMap`
-   - **Output:** `TestPlan`
-   - **Method:**
-     - Claude generates 11-check test suite
-     - Adaptive based on target's attack surface
-   - **Cost Target:** $1-3
+4. **Validate Against Fixtures**
+   - Run recon on `benign_agent/` → verify `TopologyMap` is accurate
+   - Run recon on `vulnerable_agent/` → verify system prompt strings are captured
 
-5. **Red-Team Executor** (`lighthouse/agents/red_team.py`)
-   - **Input:** `TestPlan`, `TargetAdapter`
-   - **Output:** `list[Finding]`
-   - **Method:**
-     - Claude generates adversarial payloads
-     - Execute via adapter (deterministic)
+### Exit Criteria
+- [ ] Recon produces a valid `TopologyMap` for both fixtures
+- [ ] All fields populated (no unexplained `None`s)
+- [ ] Trace log shows the full LLM call
+
+---
+
+## Phase 2 — Test Designer + Red-Team Executor
+**Goal:** Turn a `TopologyMap` into adversarial findings.  
+**Dependency:** Requires Phase 1's `TopologyMap` output.
+
+### Tasks
+
+1. **Test Designer** (`lighthouse/agents/test_designer.py`)
+   - Input: `TopologyMap`
+   - Output: `TestPlan` (11 targeted probes)
+   - Method: Claude Sonnet 4 generates test cases adapted to what recon found
+   - Probes should cover: prompt injection, jailbreaks, PII leakage, system prompt extraction, hallucination triggers
+
+2. **Red-Team Executor** (`lighthouse/agents/red_team.py`)
+   - Input: `TestPlan` + `TargetAdapter`
+   - Output: `list[Finding]`
+   - Method:
+     - Claude Opus 4 generates adversarial payloads per probe
+     - Deterministic code executes them via adapter
      - Claude analyzes responses for failures
-   - **Attack vectors:**
-     - Prompt injection
-     - Jailbreaks
-     - PII leakage
-     - System prompt extraction
-   - **Cost Target:** $15-20
+   - This is a hybrid: **LLM generates, code executes, LLM judges**
 
-6. **Compliance Mapper** (`lighthouse/agents/compliance.py`)
-   - **Input:** `list[Finding]`
-   - **Output:** `list[Finding]` (with compliance_tags added)
-   - **Method:**
-     - Deterministic lookup table for known patterns
-     - Claude fallback for novel violations
-   - **Frameworks:** EU AI Act, NIST AI RMF, OWASP Top 10 for LLMs
-   - **Cost Target:** $3-5
-   - Create `compliance_mapping.json` with rules
+3. **Expand Vulnerable Fixture**
+   - Add actual injectable endpoints to `vulnerable_agent/` so red-team has real targets
+   - Expected findings should be documented in the fixture's own README
 
-7. **Report Synthesizer** (`lighthouse/agents/synthesizer.py`)
-   - **Input:** `AuditReport`
-   - **Output:** `tuple[str, str]` (report.json, dashboard.html)
-   - **Method:**
-     - Claude generates executive summary
-     - Render HTML using Jinja2 template
-   - **Cost Target:** $5-8
-
-#### Phase 3: Templates & Testing (Days 8-9)
-8. **HTML Dashboard Template** (`lighthouse/templates/report.html`)
-   - Executive summary section
-   - Findings table (sortable by severity)
-   - Compliance mapping visualization
-   - Metrics dashboard (charts using Chart.js)
-   - Remediation recommendations
-
-9. **Agent Testing**
-   - Unit tests for each agent
-   - Use Track A's sample target agents
-   - Validate output schemas
-   - Test cost stays within budget targets
-
-### Deliverables for Track B
-- ✅ All 5 LLM-powered agents with tests
-- ✅ System prompts library
-- ✅ HTML dashboard template
-- ✅ Compliance mapping rules
-- ✅ LLM client wrapper with cost tracking
-
-### Integration Points
-**What Track B needs from Track A:**
-- `TargetAdapter` Protocol and `LocalRepoAdapter` implementation
-- Pydantic schemas (especially `Finding`, `TopologyMap`, `TestPlan`)
-- Sample target agents for testing
+### Exit Criteria
+- [ ] `TestPlan` has ≥ 8 probes for a complex target
+- [ ] Red-team detects all known vulnerabilities in `vulnerable_agent/`
+- [ ] `Finding` objects include severity, evidence, and remediation
 
 ---
 
-## Critical Dependencies & Timeline
+## Phase 3 — Compliance Mapper + Operational Probe
+**Goal:** Enrich findings with regulatory tags and performance data.  
+**Dependency:** Requires Phase 2's `list[Finding]`.  
+**Note:** Operational probe has no LLM dependency — can be built any time after Phase 0.
 
-### Day 2 Checkpoint: Schemas Complete
-- **Track A** must finish `schemas.py`
-- **Track B** can then start building agents in parallel
-- **Sync:** 30-minute call to review schemas
+### Tasks
 
-### Day 5 Checkpoint: First Integration
-- **Track A** has working adapter + operational probe
-- **Track B** has reconnaissance agent ready
-- **Test:** Run recon agent on sample target via adapter
-- **Sync:** 1-hour pair programming session
+1. **Compliance Mapper** (`lighthouse/agents/compliance.py`)
+   - Input: `list[Finding]`
+   - Output: same `list[Finding]` with `compliance_tags` populated
+   - Method:
+     - Deterministic lookup table: map known finding patterns → EU AI Act / NIST / OWASP tags
+     - Claude Sonnet 4 fallback for novel findings with no table match
+   - Create `compliance_mapping.json` with known patterns
 
-### Day 7 Checkpoint: Full Pipeline
-- **Track A** has meta-agent orchestrator
-- **Track B** has all 5 agents complete
-- **Test:** End-to-end audit on vulnerable_agent
-- **Sync:** 1-hour integration testing session
+2. **Operational Probe** (`lighthouse/agents/operational.py`)
+   - Input: `TargetAdapter`
+   - Output: `PerformanceMetrics`
+   - Method: **Pure Python, no LLM**
+   - Measures: latency distribution, token usage per call, error rate
+   - Can run in parallel with red-team in final pipeline
 
-### Day 9: Final Integration & Polish
-- Merge both tracks
-- Run full test suite
-- Fix any integration bugs
-- Polish CLI and documentation
-
----
-
-## Communication Protocol
-
-### Daily Standups (15 min)
-- What did you ship yesterday?
-- What are you shipping today?
-- Any blockers?
-
-### Shared Resources
-- **Slack/Discord channel:** #lighthouse-dev
-- **Shared doc:** Running list of integration questions
-- **GitHub:** 
-  - Track A works in `foundation` branch
-  - Track B works in `agents` branch
-  - Merge to `main` at checkpoints
-
-### When to Sync Immediately
-- Schema changes (affects both tracks)
-- Adapter Protocol changes
-- Budget calculation changes
-- Breaking changes to any shared interface
+### Exit Criteria
+- [ ] All `critical` and `high` findings in `vulnerable_agent/` have compliance tags
+- [ ] `PerformanceMetrics` populated for any fixture agent
 
 ---
 
-## Conflict Avoidance Strategy
+## Phase 4 — Report Synthesizer + Dashboard
+**Goal:** Turn raw findings into a human-readable executive report.  
+**Dependency:** Requires Phases 2–3 outputs combined into an `AuditReport`.
 
-### Directory Ownership
-- **Track A owns:**
-  - `lighthouse/core/` (except `llm_client.py`)
-  - `lighthouse/utils/`
-  - `lighthouse/cli.py`
-  - `tests/fixtures/`
+### Tasks
 
-- **Track B owns:**
-  - `lighthouse/agents/` (except `operational.py`)
-  - `lighthouse/prompts/`
-  - `lighthouse/templates/`
-  - `lighthouse/core/llm_client.py`
+1. **Report Synthesizer** (`lighthouse/agents/synthesizer.py`)
+   - Input: `AuditReport`
+   - Output: `report.json` + `dashboard.html`
+   - Method:
+     - Claude Sonnet 4 generates executive summary (risk level, top findings, remediation)
+     - Renders `report.html` Jinja2 template with all data
 
-- **Shared (requires coordination):**
-  - `lighthouse/core/schemas.py` (Track A creates, both use)
-  - `README.md` (Track A writes setup, Track B writes usage)
+2. **HTML Dashboard** (`lighthouse/templates/report.html`)
+   - Self-contained static file (no backend)
+   - Sections: risk badge, executive summary, findings by severity, compliance table, operational metrics, trace download link
 
-### Merge Strategy
-- Use feature branches for each component
-- Squash merge to keep history clean
-- Track A merges first at each checkpoint
-- Track B rebases and resolves conflicts
+### Exit Criteria
+- [ ] `dashboard.html` renders correctly in a browser for `vulnerable_agent/` audit
+- [ ] Executive summary accurately reflects the most critical findings
 
 ---
 
-## Success Criteria for Each Track
+## Phase 5 — Orchestrator + CLI
+**Goal:** Wire everything into a single runnable command.  
+**Dependency:** All agents complete.
 
-### Track A Success = Infrastructure Works
-- ✅ Can load any target agent via adapter
-- ✅ Can execute agents and capture traces
-- ✅ Operational probe returns accurate metrics
-- ✅ Meta-agent orchestrates full pipeline
-- ✅ CLI provides good UX
+### Tasks
 
-### Track B Success = Intelligence Works
-- ✅ Reconnaissance accurately maps target topology
-- ✅ Red-team finds real vulnerabilities
-- ✅ Compliance mapping is accurate (90%+ precision)
-- ✅ Reports are executive-ready
-- ✅ Total cost stays under $50/audit
+1. **Meta-Agent Orchestrator** (`lighthouse/core/meta_agent.py`)
+   ```
+   AuditConfig
+       └─► LocalRepoAdapter
+               ├─[1]─► Reconnaissance      →  TopologyMap
+               ├─[2]─► Test Designer       →  TestPlan
+               ├─[3]─► Red-Team            ─┐  (parallel via asyncio.gather)
+               ├─[3]─► Operational          ─┘  →  list[Finding] + PerformanceMetrics
+               ├─[4]─► Compliance           →  findings with compliance_tags
+               └─[5]─► Synthesizer          →  report.json + dashboard.html
+   ```
 
-### Combined Success = Lighthouse Ships
-- ✅ End-to-end audit runs successfully
-- ✅ All tests pass
-- ✅ Documentation is complete
-- ✅ Ready to demo/deploy
+2. **CLI** (`lighthouse/cli.py`)
+   ```bash
+   lighthouse audit ./my-agent
+   lighthouse audit --api https://my-agent.example.com/invoke
+   ```
+   - Progress display via `rich`
+   - Graceful error handling with actionable messages
 
----
+3. **End-to-End Test**
+   - Run full audit on all three fixtures
+   - Verify output files exist and are valid
+   - Verify trace log is complete
 
-## Fallback Plan
-
-If integration takes longer than expected:
-
-**Option 1: Ship Track A First**
-- Release as "Lighthouse Core" - just adapter + operational probe
-- Shows infrastructure works
-- Track B ships as v0.2
-
-**Option 2: Ship Track B with Mock Adapter**
-- Release as "Lighthouse Analysis" - demo mode only
-- Uses pre-recorded adapter responses
-- Track A ships as v0.2 for production use
-
-**Option 3: Extend Timeline**
-- Add 2-3 days for integration
-- Worth it if both tracks are high quality
-- Better to ship late than ship broken
+### Exit Criteria
+- [ ] `poetry run lighthouse audit tests/fixtures/benign_agent` completes without error
+- [ ] Output files written to `outputs/audits/<target_id>/`
+- [ ] Full JSONL trace present
 
 ---
 
-## Questions for Initial Kickoff
+## Phase Gate Summary
 
-1. **Who takes which track?**
-   - Track A fits: Systems engineer, backend expert, loves infrastructure
-   - Track B fits: ML engineer, prompt engineer, loves LLM work
+| Phase | What You Build | Validates |
+|-------|---------------|-----------|
+| **0 — Foundation** | Schemas, utils, fixtures | Contracts are stable |
+| **1 — Recon** ⚠️ | Adapter + LLM extraction | Adapter pattern works; LLM output is structured |
+| **2 — Red-Team** | Test designer + adversarial executor | Core value proposition |
+| **3 — Enrichment** | Compliance tags + performance metrics | Output is enterprise-ready |
+| **4 — Reporting** | Synthesizer + dashboard | Deliverable is human-readable |
+| **5 — Integration** | Orchestrator + CLI | System runs end-to-end |
 
-2. **What's the source of truth for schemas?**
-   - Suggestion: Track A owns `schemas.py`, Track B reviews/approves
-
-3. **How do we handle API key management?**
-   - Suggestion: Both use `.env` file, Track B documents key requirements
-
-4. **What's the testing strategy?**
-   - Suggestion: Each track writes unit tests, integration tests at checkpoints
-
-5. **What's the definition of "done" for each component?**
-   - Suggestion: Tests pass + peer review + docs updated
-
----
-
-**Bottom Line:** This split lets two developers work in parallel with minimal blocking. The key is the Day 2 schema checkpoint and regular sync points to catch integration issues early.
+> Each phase gate must pass before the next phase begins.
